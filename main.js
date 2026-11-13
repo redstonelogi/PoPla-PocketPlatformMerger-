@@ -15,22 +15,31 @@ async function extractGameData(file) {
 }
 
 // Der eigentliche Merge-Prozess
-async function mergeGames(file1, file2) {
-    const data1 = await extractGameData(file1);
-    const data2 = await extractGameData(file2);
+async function mergeGames(files) {
+    if (files.length < 2) {
+        throw new Error("Bitte wähle mindestens zwei Spiel-Dateien aus.");
+    }
 
-    // Keep the first game's start screen and the second game's ending screen.
-    // Each game's first and last levels are reserved for these screens.
+    const games = await Promise.all(files.map(extractGameData));
+    games.forEach((game, index) => {
+        if (!Array.isArray(game.levels) || game.levels.length < 2) {
+            throw new Error(`Spiel ${index + 1} enthält keine gültigen Start- und Endbildschirm-Level.`);
+        }
+    });
+
+    // Keep the first start screen and last ending screen; discard the reserved
+    // screens at the boundaries of every game between them.
     const mergedLevels = [
-        ...data1.levels.slice(0, -1),
-        ...data2.levels.slice(1)
+        ...games[0].levels.slice(0, -1),
+        ...games.slice(1, -1).flatMap(game => game.levels.slice(1, -1)),
+        ...games[games.length - 1].levels.slice(1)
     ];
 
     // 2. Neues kombiniertes Datenobjekt erstellen (nutzt die Basis von Spiel 1)
     const mergedData = {
-        ...data1,
+        ...games[0],
         levels: mergedLevels,
-        gamesName: (data1.gamesName || "Game") + " + " + (data2.gamesName || "Game2")
+        gamesName: games.map((game, index) => game.gamesName || `Game ${index + 1}`).join(" + ")
     };
 
     // Optional: Hier könnten später noch Sprites/Sounds gemerged werden
@@ -74,12 +83,11 @@ function downloadHtmlFile(filename, htmlContent) {
 
 // Event-Listener für den Button in der index.html
 document.getElementById("mergeButton").addEventListener("click", async () => {
-    const fileInput1 = document.getElementById("file1").files[0];
-    const fileInput2 = document.getElementById("file2").files[0];
+    const files = Array.from(document.getElementById("games").files);
     const statusDiv = document.getElementById("status");
 
-    if (!fileInput1 || !fileInput2) {
-        statusDiv.innerText = "Bitte wähle beide Spiel-Dateien aus!";
+    if (files.length < 2) {
+        statusDiv.innerText = "Bitte wähle mindestens zwei Spiel-Dateien aus.";
         return;
     }
 
@@ -87,10 +95,10 @@ document.getElementById("mergeButton").addEventListener("click", async () => {
         statusDiv.innerText = "Spiele werden zusammengefügt...";
 
         // 1. Spiele datenmäßig mergen
-        const mergedData = await mergeGames(fileInput1, fileInput2);
+        const mergedData = await mergeGames(files);
 
         // 2. Originaltext von Spiel 1 als HTML-Gerüst holen
-        const templateHtml = await fileInput1.text();
+        const templateHtml = await files[0].text();
 
         // 3. Neues HTML mit den gemergten Daten bauen
         const finalHtml = buildMergedHtml(templateHtml, mergedData);
@@ -99,7 +107,7 @@ document.getElementById("mergeButton").addEventListener("click", async () => {
         const safeFileName = (mergedData.gamesName || "Merged_Game").replace(/[^a-z0-9_-]/gi, '_');
         downloadHtmlFile(safeFileName, finalHtml);
 
-        statusDiv.innerText = "Erfolgreich! Die Datei wurde heruntergeladen (" + mergedData.levels.length + " Level).";
+        statusDiv.innerText = "Erfolgreich! Die Datei wurde heruntergeladen (" + (mergedData.levels.length - 2) + " spielbare Level).";
 
     } catch (error) {
         console.error(error);
