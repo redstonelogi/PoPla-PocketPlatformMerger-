@@ -19,18 +19,12 @@ async function mergeGames(file1, file2) {
     const data1 = await extractGameData(file1);
     const data2 = await extractGameData(file2);
 
-    // 1. Level zusammenführen (Level von Spiel 2 an Spiel 1 anhängen)
-    const mergedLevels = [...data1.levels, ...data2.levels];
-
-    // Level-Indizes/Nummern fortlaufend anpassen
-    mergedLevels.forEach((level, index) => {
-        level.levelNumber = index + 1;
-    });
-
-
-    // 👉 HIER DAS LOG EINFÜGEN:
-    console.log("GESAMTE LEVEL ANZAHL:", mergedLevels.length);
-    console.log("ALLE LEVEL DATEN:", mergedLevels);
+    // Keep the first game's start screen and the second game's ending screen.
+    // Each game's first and last levels are reserved for these screens.
+    const mergedLevels = [
+        ...data1.levels.slice(0, -1),
+        ...data2.levels.slice(1)
+    ];
 
     // 2. Neues kombiniertes Datenobjekt erstellen (nutzt die Basis von Spiel 1)
     const mergedData = {
