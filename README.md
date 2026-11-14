@@ -11,3 +11,7 @@ Beware of the Order how you select the games !
 ## Other
 PocketPlatformer by l0bster2
 https://github.com/l0bster2/pocket-platformer
+
+## Planed
+- Testing for Custom tiles
+- Support for Beta Feature Metroidavania
