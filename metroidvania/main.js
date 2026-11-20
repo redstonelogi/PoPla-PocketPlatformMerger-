@@ -237,6 +237,11 @@ function buildMergedHtml(templateHtml, mergedData) {
         throw new Error("The selected game template does not support custom finish-flag exits.");
     }
 
+    mergedHtml = mergedHtml.replace(
+        /this\.ensureUniqueFlags\(ObjectTypes\.(?:START|FINISH)_FLAG\);/g,
+        ""
+    );
+
     return mergedHtml.replace(/<meta\b[^>]*>/gi, tag => {
         if (!/\bname=["']viewport["']/i.test(tag)) {
             return tag;
