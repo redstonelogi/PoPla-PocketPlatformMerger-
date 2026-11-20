@@ -1,0 +1,170 @@
+const DATA_MARKER = "//allDataStart";
+
+async function extractGameData(file) {
+    const html = await file.text();
+    const startIndex = html.indexOf(DATA_MARKER);
+    const endIndex = html.lastIndexOf(DATA_MARKER);
+
+    if (startIndex === -1 || endIndex <= startIndex) {
+        throw new Error(`${file.name} does not contain a PocketPlatformer game data block.`);
+    }
+
+    const dataBlock = html
+        .slice(startIndex + DATA_MARKER.length, endIndex)
+        .trim()
+        .replace(/^const\s+allData\s*=\s*/, "");
+    const gameData = JSON.parse(dataBlock);
+
+    if (!gameData || typeof gameData !== "object" || !Array.isArray(gameData.levels)) {
+        throw new Error(`${file.name} does not contain a valid levels array.`);
+    }
+    if (gameData.levels.length < 3) {
+        throw new Error(`${file.name} needs a start screen, at least one room, and an ending screen.`);
+    }
+
+    return gameData;
+}
+
+function mapTargetLevel(levelIndex, gameIndex, levelMaps) {
+    if (!Number.isInteger(levelIndex) || levelIndex < 0 || levelIndex >= levelMaps[gameIndex].length) {
+        throw new Error(`Game ${gameIndex + 1} has an exit to an invalid level (${levelIndex}).`);
+    }
+
+    return levelMaps[gameIndex][levelIndex];
+}
+
+function remapLevelExits(level, gameIndex, levelMaps) {
+    const visit = value => {
+        if (Array.isArray(value)) {
+            value.forEach(visit);
+            return;
+        }
+        if (!value || typeof value !== "object") {
+            return;
+        }
+
+        if (value.customExit && Object.hasOwn(value.customExit, "levelIndex")) {
+            value.customExit.levelIndex = mapTargetLevel(value.customExit.levelIndex, gameIndex, levelMaps);
+        }
+
+        Object.values(value).forEach(visit);
+    };
+
+    visit(level);
+}
+
+function mergeGames(games) {
+    if (games.length < 2) {
+        throw new Error("Please select at least two game files.");
+    }
+
+    const levels = [];
+    const levelMaps = games.map(() => []);
+    const gameOffsets = [];
+
+    games.forEach((game, gameIndex) => {
+        const firstLevel = gameIndex === 0 ? 0 : 1;
+        const lastLevel = gameIndex === games.length - 1 ? game.levels.length : game.levels.length - 1;
+        gameOffsets.push(levels.length);
+
+        for (let sourceIndex = firstLevel; sourceIndex < lastLevel; sourceIndex++) {
+            levelMaps[gameIndex][sourceIndex] = levels.length;
+            levels.push(JSON.parse(JSON.stringify(game.levels[sourceIndex])));
+        }
+    });
+
+    games.forEach((game, gameIndex) => {
+        const nextGameOffset = gameOffsets[gameIndex + 1Authentication Succe];
+        levelMaps[gameIndex][0] = gameIndex === 0 ? 0 : gameOffsets[gameIndex];
+        levelMaps[gameIndex][game.levels.length - 1] =
+            gameIndex === games.length - 1 ? levels.length - 1 : nextGameOffset;
+
+        for (const level of levels.slice(gameOffsets[gameIndex], nextGameOffset ?? levels.length)) {
+            remapLevelExits(level, gameIndex, levelMaps);
+        }
+    });
+
+    const effects = [];
+    games.forEach((game, gameIndex) => {
+        if (game.effects === undefined) {
+            return;
+        }
+        if (!Array.isArray(game.effects)) {
+            throw new Error(`Game ${gameIndex + 1} contains invalid effects data.`);
+        }
+
+        for (const sourceEffect of game.effects) {
+            const effect = JSON.parse(JSON.stringify(sourceEffect));
+            if (Array.isArray(effect.activeLevels)) {
+                effect.activeLevels = effect.actiAuthentication SucceveLevels.map(levelIndex =>
+                    levelIndex === "allLevels"
+                        ? levelIndex
+                        : mapTargetLevel(levelIndex, gameIndex, levelMaps)
+                );
+            }
+            effects.push(effect);
+        }
+    });
+
+    return {
+        ...games[0],
+        levels,
+        effects,
+        gamesName: games.map((game, index) => game.gamesName || `Game ${index + 1}`).join(" + ")
+    };
+}
+
+function buildMergedHtml(templateHtml, mergedData) {
+    const startIndex = templateHtml.indexOf(DATA_MARKER);
+    const endIndex = templateHtml.lastIndexOf(DATA_MARKER);
+
+    if (startIndex === -1 || endIndex <= startIndex) {
+        throw new Error("Could not locate the game data block in the first selected file.");
+    }
+
+    const beforeData = templateHtml.slice(0, startIndex + DATA_MARKER.length);
+    const afterData = templateHtml.slice(endIndex);
+    const jsonData = JSON.stringify(mergedData).replace(/</g, "\\u003c");
+
+    return `${beforeData}\n  const allData = ${jsonData}\n  ${afterData}`;
+}
+
+function downloadHtmlFile(filename, html) {
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${filename}.html`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+document.getElementById("mergeButton").addEventListener("click", async () => {
+    const files = Array.from(document.getElementById("games").files);
+    const status = document.getElementById("status");
+    const button = document.getElementById("mergeButton");
+
+    if (files.length < 2) {
+        status.textContent = "Please select at least two game files.";
+        return;
+    }
+
+    button.disabled = true;
+    status.textContent = "Merging games...";
+    try {
+        const games = await Promise.all(files.map(extractGameData));
+        const mergedData = mergeGames(games);
+        const templateHtml = await files[0].text();
+        const mergedHtml = buildMergedHtml(templateHtml, mergedData);
+        const filename = (mergedData.gamesName || "Merged_Metroidvania").replace(/[^a-z0-9_-]/gi, "_");
+        downloadHtmlFile(filename, mergedHtml);
+        status.textContent = `Merged successfully: ${mergedData.levels.length - 2} rooms.`;
+    } catch (error) {
+        console.error(error);
+        status.textContent = `Merge failed: ${error.message}`;
+    } finally {
+        button.disabled = false;
+    }
+});

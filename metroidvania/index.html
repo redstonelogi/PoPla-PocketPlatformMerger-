@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PocketPlatformer Metroidvania Merger</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            min-height: 100vh;
+            margin: 0;
+            padding: 24px;
+            display: grid;
+            place-items: center;
+            background: #1a1a1a;
+            color: #fff;
+            font-family: Arial, sans-serif;
+        }
+        .merger-box {
+            width: min(100%, 460px);
+            padding: 30px;
+            border-radius: 8px;
+            background: #2a2a2a;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+        }
+        h1 {
+            margin-top: 0;
+            color: #4caf50;
+            text-align: center;
+        }
+        p {
+            line-height: 1.5;
+        }
+        .input-group {
+            margin: 24px 0 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        input[type="file"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            background: #333;
+            color: #fff;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            border: 0;
+            border-radius: 4px;
+            background: #4caf50;
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        button:hover:not(:disabled) {
+            background: #45a049;
+        }
+        button:disabled {
+            cursor: wait;
+            opacity: 0.7;
+        }
+        #status {
+            min-height: 1.5em;
+            margin-top: 15px;
+            color: #ffeb3b;
+            text-align: center;
+            overflow-wrap: anywhere;
+        }
+    </style>
+</head>
+<body>
+    <main class="merger-box">
+        <h1>PoPla Metroidvania Merger</h1>
+        <p>Select two or more PocketPlatformer HTML games in the order you want to combine them. The first start screen and final ending screen are kept; room exits and level effects are updated to match the merged room order.</p>
+        <div class="input-group">
+            <label for="games">PocketPlatformer games (HTML files)</label>
+            <input type="file" id="games" accept=".html,text/html" multiple>
+        </div>
+        <button id="mergeButton" type="button">Merge games</button>
+        <div id="status" role="status" aria-live="polite"></div>
+    </main>
+    <script src="main.js"></script>
+</body>
+</html>

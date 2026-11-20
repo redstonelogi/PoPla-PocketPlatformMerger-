@@ -12,6 +12,5 @@ Beware of the Order how you select the games !
 PocketPlatformer by l0bster2
 https://github.com/l0bster2/pocket-platformer
 
-## Planed
-- Testing for Custom tiles
-- Support for Beta Feature Metroidavania
+## Metroidvania merger
+Open `metroidvania/index.html` to merge two or more PocketPlatformer HTML games. The merger keeps the first start screen and final ending screen, combines their rooms in the selected order, and remaps room exits and level-specific effects.
