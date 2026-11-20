@@ -74,12 +74,13 @@ function mergeGames(games) {
     });
 
     games.forEach((game, gameIndex) => {
-        const nextGameOffset = gameOffsets[gameIndex + 1Authentication Succe];
+        const nextGameOffset = gameOffsets[gameIndex + 1];
         levelMaps[gameIndex][0] = gameIndex === 0 ? 0 : gameOffsets[gameIndex];
         levelMaps[gameIndex][game.levels.length - 1] =
             gameIndex === games.length - 1 ? levels.length - 1 : nextGameOffset;
 
-        for (const level of levels.slice(gameOffsets[gameIndex], nextGameOffset ?? levels.length)) {
+        const gameEndOffset = nextGameOffset === undefined ? levels.length : nextGameOffset;
+        for (const level of levels.slice(gameOffsets[gameIndex], gameEndOffset)) {
             remapLevelExits(level, gameIndex, levelMaps);
         }
     });
@@ -96,7 +97,7 @@ function mergeGames(games) {
         for (const sourceEffect of game.effects) {
             const effect = JSON.parse(JSON.stringify(sourceEffect));
             if (Array.isArray(effect.activeLevels)) {
-                effect.activeLevels = effect.actiAuthentication SucceveLevels.map(levelIndex =>
+                effect.activeLevels = effect.activeLevels.map(levelIndex =>
                     levelIndex === "allLevels"
                         ? levelIndex
                         : mapTargetLevel(levelIndex, gameIndex, levelMaps)
