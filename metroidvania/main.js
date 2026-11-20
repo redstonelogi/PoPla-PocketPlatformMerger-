@@ -81,11 +81,113 @@ function remapLevelExits(level, gameIndex, levelMaps) {
     visit(level);
 }
 
+function mergeSprites(games) {
+    const mergedSprites = { ...(games[0].sprites || {}) };
+
+    games.slice(1).forEach((game, gameOffset) => {
+        const gameNumber = gameOffset + 2;
+        const spriteKeyMap = new Map();
+        const aliasedSprites = [];
+
+        Object.entries(game.sprites || {}).forEach(([key, sprite]) => {
+            const existing = mergedSprites[key];
+            if (!existing) {
+                mergedSprites[key] = sprite;
+                spriteKeyMap.set(key, key);
+                return;
+            }
+
+            if (JSON.stringify(existing) === JSON.stringify(sprite)) {
+                spriteKeyMap.set(key, key);
+                return;
+            }
+
+            if (!sprite.custom && !["objects", "tiles", "deco"].includes(sprite.type)) {
+                spriteKeyMap.set(key, key);
+                return;
+            }
+
+            const baseName = `${sprite.descriptiveName || sprite.name} (Game ${gameNumber})`;
+            let descriptiveName = baseName;
+            let suffix = 2;
+            let aliasKey = descriptiveName.replace(/\s/g, "");
+            while (mergedSprites[aliasKey] ||
+                Object.values(mergedSprites).some(existingSprite => existingSprite.descriptiveName === descriptiveName)) {
+                descriptiveName = `${baseName} ${suffix++}`;
+                aliasKey = descriptiveName.replace(/\s/g, "");
+            }
+
+            const spriteCopy = { ...sprite, descriptiveName, custom: true };
+            if (sprite.type === "tiles" && Number.isInteger(sprite.name)) {
+                const tileNames = Object.values(mergedSprites)
+                    .filter(existingSprite => existingSprite.type === "tiles")
+                    .map(existingSprite => existingSprite.name)
+                    .filter(Number.isInteger);
+                spriteCopy.name = Math.max(17, ...tileNames) + 1;
+            }
+
+            mergedSprites[aliasKey] = spriteCopy;
+            spriteKeyMap.set(key, aliasKey);
+            aliasedSprites.push({ sprite, spriteCopy });
+        });
+
+        game.levels.forEach(level => {
+            if (Array.isArray(level.tileData)) {
+                Object.entries(game.sprites || {}).forEach(([key, sprite]) => {
+                    const aliasKey = spriteKeyMap.get(key);
+                    const aliasedSprite = aliasKey && mergedSprites[aliasKey];
+                    if (aliasedSprite && aliasKey !== key &&
+                        sprite.type === "tiles" && Number.isInteger(sprite.name)) {
+                        level.tileData.forEach(row => {
+                            row.forEach((value, index) => {
+                                if (value === sprite.name) row[index] = aliasedSprite.name;
+                            });
+                        });
+                    }
+                });
+            }
+
+            ["levelObjects", "enemies", "weapons"].forEach(collectionName => {
+                (level[collectionName] || []).forEach(object => {
+                    aliasedSprites.forEach(({ sprite, spriteCopy }) => {
+                        if (object.extraAttributes?.customName === sprite.descriptiveName ||
+                            (sprite.type !== "deco" &&
+                                (sprite.type === "objects" ||
+                                    (sprite.type === "tiles" && !Number.isInteger(sprite.name))) &&
+                                object.type === sprite.name && !object.extraAttributes?.customName)) {
+                            object.extraAttributes = {
+                                ...(object.extraAttributes || {}),
+                                customName: spriteCopy.descriptiveName
+                            };
+                        }
+                    });
+                });
+            });
+
+            if (Array.isArray(level.deko)) {
+                const sourceDeko = Object.entries(game.sprites || {})
+                    .filter(([, sprite]) => sprite.name === "deco");
+                const mergedDeko = Object.entries(mergedSprites)
+                    .filter(([, sprite]) => sprite.name === "deco");
+                level.deko.forEach(deko => {
+                    const sourceKey = sourceDeko[deko.index]?.[0];
+                    const destinationKey = sourceKey && spriteKeyMap.get(sourceKey);
+                    const destinationIndex = mergedDeko.findIndex(([key]) => key === destinationKey);
+                    if (destinationIndex !== -1) deko.index = destinationIndex;
+                });
+            }
+        });
+    });
+
+    return mergedSprites;
+}
+
 function mergeGames(games) {
     if (games.length < 2) {
         throw new Error("Please select at least two game files.");
     }
 
+    const sprites = mergeSprites(games);
     const startScreen = JSON.parse(JSON.stringify(games[0].levels[0]));
     startScreen.position = null;
     const levels = [startScreen];
@@ -208,6 +310,7 @@ function mergeGames(games) {
     return {
         ...games[0],
         levels,
+        sprites,
         effects,
         endingMessage: games[games.length - 1].endingMessage || games[0].endingMessage,
         gamesName: games.map((game, index) => game.gamesName || `Game ${index + 1}`).join(" + ")
