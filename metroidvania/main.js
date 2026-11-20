@@ -81,6 +81,19 @@ function remapLevelExits(level, gameIndex, levelMaps) {
     visit(level);
 }
 
+function connectGameBoundary(level, destinationLevel) {
+    (level.levelObjects || []).forEach(levelObject => {
+        if (levelObject.type !== "finishFlag") {
+            return;
+        }
+
+        const attributes = levelObject.extraAttributes || (levelObject.extraAttributes = {});
+        if (!attributes.customExit) {
+            attributes.customExit = { levelIndex: destinationLevel };
+        }
+    });
+}
+
 function mergeGames(games) {
     if (games.length < 2) {
         throw new Error("Please select at least two game files.");
@@ -180,6 +193,11 @@ function mergeGames(games) {
     games.forEach((game, gameIndex) => {
         for (let sourceIndex = 1; sourceIndex < game.levels.length - 1; sourceIndex++) {
             remapLevelExits(levels[levelMaps[gameIndex][sourceIndex]], gameIndex, levelMaps);
+        }
+
+        if (nextGameOffset !== undefined) {
+            const lastRoomIndex = levelMaps[gameIndex][game.levels.length - 2];
+            connectGameBoundary(levels[lastRoomIndex], nextGameOffset);
         }
     });
 
