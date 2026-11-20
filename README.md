@@ -13,4 +13,4 @@ PocketPlatformer by l0bster2
 https://github.com/l0bster2/pocket-platformer
 
 ## Metroidvania merger
-Open `metroidvania/index.html` to merge two or more PocketPlatformer HTML games. The merger keeps the first start screen and final ending screen, combines their rooms in the selected order, and remaps room exits and level-specific effects.
+Open `metroidvania/index.html` to merge two or more PocketPlatformer Metroidvania HTML games. Their positioned rooms are combined into one world, with the first start screen and start flag, the last finish flag and ending screen, and remapped room exits and level-specific effects.

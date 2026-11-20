@@ -26,11 +26,39 @@ async function extractGameData(file) {
 }
 
 function mapTargetLevel(levelIndex, gameIndex, levelMaps) {
-    if (!Number.isInteger(levelIndex) || levelIndex < 0 || levelIndex >= levelMaps[gameIndex].length) {
+    if (!Number.isInteger(levelIndex)
+        || levelIndex < 0
+        || levelIndex >= levelMaps[gameIndex].length
+        || !Number.isInteger(levelMaps[gameIndex][levelIndex])) {
         throw new Error(`Game ${gameIndex + 1} has an exit to an invalid level (${levelIndex}).`);
     }
 
     return levelMaps[gameIndex][levelIndex];
+}
+
+function parseRoomPosition(position) {
+    const match = typeof position === "string" && position.match(/^([a-z]+)([1-9]\d*)$/);
+    if (!match) {
+        return null;
+    }
+
+    let column = 0;
+    for (const letter of match[1]) {
+        column = column * 26 + letter.charCodeAt(0) - 96;
+    }
+
+    return { column: column - 1, row: Number(match[2]) };
+}
+
+function formatRoomPosition(column, row) {
+    let remainingColumn = column;
+    let letters = "";
+    do {
+        letters = String.fromCharCode(97 + remainingColumn % 26) + letters;
+        remainingColumn = Math.floor(remainingColumn / 26) - 1;
+    } while (remainingColumn >= 0);
+
+    return `${letters}${row}`;
 }
 
 function remapLevelExits(level, gameIndex, levelMaps) {
@@ -53,53 +81,105 @@ function remapLevelExits(level, gameIndex, levelMaps) {
     visit(level);
 }
 
-function connectGameBoundary(level, destinationLevel) {
-    (level.levelObjects || []).forEach(levelObject => {
-        if (levelObject.type !== "finishFlag") {
-            return;
-        }
-
-        const attributes = levelObject.extraAttributes || (levelObject.extraAttributes = {});
-        if (!attributes.customExit) {
-            attributes.customExit = { levelIndex: destinationLevel };
-        }
-    });
-}
-
 function mergeGames(games) {
     if (games.length < 2) {
         throw new Error("Please select at least two game files.");
     }
 
-    const levels = [];
+    const startScreen = JSON.parse(JSON.stringify(games[0].levels[0]));
+    startScreen.position = null;
+    const levels = [startScreen];
     const levelMaps = games.map(() => []);
-    const gameOffsets = [];
+    const firstRoomIndices = [];
+    const sourceRoomLevels = [];
+    let nextColumn = 0;
 
     games.forEach((game, gameIndex) => {
-        const firstLevel = gameIndex === 0 ? 0 : 1;
-        const lastLevel = gameIndex === games.length - 1 ? game.levels.length : game.levels.length - 1;
-        gameOffsets.push(levels.length);
-
-        for (let sourceIndex = firstLevel; sourceIndex < lastLevel; sourceIndex++) {
-            levelMaps[gameIndex][sourceIndex] = levels.length;
-            levels.push(JSON.parse(JSON.stringify(game.levels[sourceIndex])));
+        const rooms = game.levels.slice(1, -1);
+        if (rooms.length === 0) {
+            throw new Error(`Game ${gameIndex + 1} does not contain any playable rooms.`);
         }
+        const roomPositions = rooms.map((room, roomIndex) => {
+            const position = parseRoomPosition(room.position);
+            if (!position) {
+                throw new Error(`Game ${gameIndex + 1}, room ${roomIndex + 1} has an invalid room position.`);
+            }
+            return position;
+        });
+        const uniquePositions = new Set(roomPositions.map(({ column, row }) => `${column},${row}`));
+        if (uniquePositions.size !== roomPositions.length) {
+            throw new Error(`Game ${gameIndex + 1} contains rooms with duplicate positions.`);
+        }
+
+        const minColumn = Math.min(...roomPositions.map(position => position.column));
+        const maxColumn = Math.max(...roomPositions.map(position => position.column));
+        const columnOffset = nextColumn - minColumn;
+        const firstMergedRoom = levels.length;
+        nextColumn = maxColumn + columnOffset + 1;
+        firstRoomIndices[gameIndex] = firstMergedRoom;
+
+        levelMaps[gameIndex][0] = 0;
+
+        rooms.forEach((sourceRoom, roomIndex) => {
+            const room = JSON.parse(JSON.stringify(sourceRoom));
+            const position = roomPositions[roomIndex];
+            room.position = formatRoomPosition(position.column + columnOffset, position.row);
+
+            levelMaps[gameIndex][roomIndex + 1] = levels.length;
+            sourceRoomLevels.push({ gameIndex, sourceIndex: roomIndex + 1 });
+            levels.push(room);
+        });
+        levelMaps[gameIndex][game.levels.length - 1] = null;
+    });
+
+    const endingLevelIndex = levels.length;
+    const endingScreen = JSON.parse(JSON.stringify(games[games.length - 1].levels[games[games.length - 1].levels.length - 1]));
+    endingScreen.position = null;
+    levels.push(endingScreen);
+
+    games.forEach((game, gameIndex) => {
+        levelMaps[gameIndex][game.levels.length - 1] =
+            gameIndex === games.length - 1
+                ? endingLevelIndex
+                : firstRoomIndices[gameIndex + 1];
+    });
+
+    let startFlagKept = false;
+    let finishFlagKept = false;
+    const finalGameIndex = games.length - 1;
+    const finalGameHasFinishFlag = sourceRoomLevels.some(({ gameIndex, sourceIndex }) =>
+        gameIndex === finalGameIndex
+        && (games[gameIndex].levels[sourceIndex].levelObjects || [])
+            .some(levelObject => levelObject.type === "finishFlag")
+    );
+
+    sourceRoomLevels.forEach(({ gameIndex, sourceIndex }, roomOffset) => {
+        const room = levels[roomOffset + 1];
+        room.levelObjects = (room.levelObjects || []).filter(levelObject => {
+            if (levelObject.type === "startFlag") {
+                if (startFlagKept) {
+                    return false;
+                }
+                startFlagKept = true;
+            }
+
+            if (levelObject.type === "finishFlag") {
+                if (finalGameHasFinishFlag && gameIndex !== finalGameIndex) {
+                    return false;
+                }
+                if (finishFlagKept) {
+                    return false;
+                }
+                finishFlagKept = true;
+            }
+
+            return true;
+        });
     });
 
     games.forEach((game, gameIndex) => {
-        const nextGameOffset = gameOffsets[gameIndex + 1];
-        levelMaps[gameIndex][0] = gameIndex === 0 ? 0 : gameOffsets[gameIndex];
-        levelMaps[gameIndex][game.levels.length - 1] =
-            gameIndex === games.length - 1 ? levels.length - 1 : nextGameOffset;
-
-        const gameEndOffset = nextGameOffset === undefined ? levels.length : nextGameOffset;
-        for (const level of levels.slice(gameOffsets[gameIndex], gameEndOffset)) {
-            remapLevelExits(level, gameIndex, levelMaps);
-        }
-
-        if (nextGameOffset !== undefined) {
-            const lastRoomIndex = levelMaps[gameIndex][game.levels.length - 2];
-            connectGameBoundary(levels[lastRoomIndex], nextGameOffset);
+        for (let sourceIndex = 1; sourceIndex < game.levels.length - 1; sourceIndex++) {
+            remapLevelExits(levels[levelMaps[gameIndex][sourceIndex]], gameIndex, levelMaps);
         }
     });
 
@@ -129,6 +209,7 @@ function mergeGames(games) {
         ...games[0],
         levels,
         effects,
+        endingMessage: games[games.length - 1].endingMessage || games[0].endingMessage,
         gamesName: games.map((game, index) => game.gamesName || `Game ${index + 1}`).join(" + ")
     };
 }
