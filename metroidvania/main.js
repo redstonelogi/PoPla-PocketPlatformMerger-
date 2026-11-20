@@ -144,41 +144,44 @@ function mergeGames(games) {
                 : firstRoomIndices[gameIndex + 1];
     });
 
-    let startFlagKept = false;
-    let finalFinishFlag = null;
-    sourceRoomLevels.forEach(({ gameIndex, sourceIndex }) => {
-        const sourceObjects = games[gameIndex].levels[sourceIndex].levelObjects || [];
-        sourceObjects.forEach((levelObject, objectIndex) => {
-            if (levelObject.type === "finishFlag") {
-                finalFinishFlag = { gameIndex, sourceIndex, objectIndex };
-            }
-        });
-    });
-
-    sourceRoomLevels.forEach(({ gameIndex, sourceIndex }, roomOffset) => {
-        const room = levels[roomOffset + 1];
-        room.levelObjects = (room.levelObjects || []).filter((levelObject, objectIndex) => {
-            if (levelObject.type === "startFlag") {
-                if (startFlagKept) {
-                    return false;
-                }
-                startFlagKept = true;
-            }
-
-            if (levelObject.type === "finishFlag") {
-                return finalFinishFlag !== null
-                    && gameIndex === finalFinishFlag.gameIndex
-                    && sourceIndex === finalFinishFlag.sourceIndex
-                    && objectIndex === finalFinishFlag.objectIndex;
-            }
-
-            return true;
-        });
-    });
-
     games.forEach((game, gameIndex) => {
         for (let sourceIndex = 1; sourceIndex < game.levels.length - 1; sourceIndex++) {
             remapLevelExits(levels[levelMaps[gameIndex][sourceIndex]], gameIndex, levelMaps);
+        }
+    });
+
+    games.forEach((game, gameIndex) => {
+        const destinationLevel = gameIndex === games.length - 1
+            ? endingLevelIndex
+            : firstRoomIndices[gameIndex + 1];
+        let destinationFlagIndex;
+
+        if (gameIndex < games.length - 1) {
+            const nextGame = games[gameIndex + 1];
+            for (let sourceIndex = 1; sourceIndex < nextGame.levels.length - 1; sourceIndex++) {
+                const startFlag = (nextGame.levels[sourceIndex].levelObjects || [])
+                    .find(levelObject => levelObject.type === "startFlag");
+                if (startFlag) {
+                    destinationFlagIndex = startFlag.extraAttributes?.flagIndex;
+                    break;
+                }
+            }
+        }
+
+        for (let sourceIndex = 1; sourceIndex < game.levels.length - 1; sourceIndex++) {
+            const mergedLevel = levels[levelMaps[gameIndex][sourceIndex]];
+            (mergedLevel.levelObjects || []).forEach(levelObject => {
+                if (levelObject.type !== "finishFlag") {
+                    return;
+                }
+
+                const customExit = { levelIndex: destinationLevel };
+                if (destinationFlagIndex) {
+                    customExit.flagIndex = destinationFlagIndex;
+                }
+                const extraAttributes = levelObject.extraAttributes || (levelObject.extraAttributes = {});
+                extraAttributes.customExit = customExit;
+            });
         }
     });
 
