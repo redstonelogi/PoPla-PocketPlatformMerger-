@@ -91,7 +91,6 @@ function mergeGames(games) {
     const levels = [startScreen];
     const levelMaps = games.map(() => []);
     const firstRoomIndices = [];
-    const sourceRoomLevels = [];
     let nextColumn = 0;
 
     games.forEach((game, gameIndex) => {
@@ -126,7 +125,6 @@ function mergeGames(games) {
             room.position = formatRoomPosition(position.column + columnOffset, position.row);
 
             levelMaps[gameIndex][roomIndex + 1] = levels.length;
-            sourceRoomLevels.push({ gameIndex, sourceIndex: roomIndex + 1 });
             levels.push(room);
         });
         levelMaps[gameIndex][game.levels.length - 1] = null;
@@ -228,7 +226,17 @@ function buildMergedHtml(templateHtml, mergedData) {
     const afterData = templateHtml.slice(endIndex);
     const jsonData = JSON.stringify(mergedData).replace(/</g, "\\u003c");
 
-    const mergedHtml = `${beforeData}\n  const allData = ${jsonData}\n  ${afterData}`;
+    let mergedHtml = `${beforeData}\n  const allData = ${jsonData}\n  ${afterData}`;
+    const hardcodedFinishExit = /PlayMode\.customExit\s*=\s*\{\s*levelIndex\s*:\s*WorldDataHandler\.levels\.length\s*-\s*1\s*}\s*;/;
+    if (hardcodedFinishExit.test(mergedHtml)) {
+        mergedHtml = mergedHtml.replace(
+            hardcodedFinishExit,
+            "PlayMode.customExit = this.customExit || { levelIndex: WorldDataHandler.levels.length - 1 };"
+        );
+    } else if (!/PlayMode\.customExit\s*=\s*this\.customExit\b/.test(mergedHtml)) {
+        throw new Error("The selected game template does not support custom finish-flag exits.");
+    }
+
     return mergedHtml.replace(/<meta\b[^>]*>/gi, tag => {
         if (!/\bname=["']viewport["']/i.test(tag)) {
             return tag;
