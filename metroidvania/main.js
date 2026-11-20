@@ -145,17 +145,19 @@ function mergeGames(games) {
     });
 
     let startFlagKept = false;
-    let finishFlagKept = false;
-    const finalGameIndex = games.length - 1;
-    const finalGameHasFinishFlag = sourceRoomLevels.some(({ gameIndex, sourceIndex }) =>
-        gameIndex === finalGameIndex
-        && (games[gameIndex].levels[sourceIndex].levelObjects || [])
-            .some(levelObject => levelObject.type === "finishFlag")
-    );
+    let finalFinishFlag = null;
+    sourceRoomLevels.forEach(({ gameIndex, sourceIndex }) => {
+        const sourceObjects = games[gameIndex].levels[sourceIndex].levelObjects || [];
+        sourceObjects.forEach((levelObject, objectIndex) => {
+            if (levelObject.type === "finishFlag") {
+                finalFinishFlag = { gameIndex, sourceIndex, objectIndex };
+            }
+        });
+    });
 
     sourceRoomLevels.forEach(({ gameIndex, sourceIndex }, roomOffset) => {
         const room = levels[roomOffset + 1];
-        room.levelObjects = (room.levelObjects || []).filter(levelObject => {
+        room.levelObjects = (room.levelObjects || []).filter((levelObject, objectIndex) => {
             if (levelObject.type === "startFlag") {
                 if (startFlagKept) {
                     return false;
@@ -164,13 +166,10 @@ function mergeGames(games) {
             }
 
             if (levelObject.type === "finishFlag") {
-                if (finalGameHasFinishFlag && gameIndex !== finalGameIndex) {
-                    return false;
-                }
-                if (finishFlagKept) {
-                    return false;
-                }
-                finishFlagKept = true;
+                return finalFinishFlag !== null
+                    && gameIndex === finalFinishFlag.gameIndex
+                    && sourceIndex === finalFinishFlag.sourceIndex
+                    && objectIndex === finalFinishFlag.objectIndex;
             }
 
             return true;
@@ -226,7 +225,16 @@ function buildMergedHtml(templateHtml, mergedData) {
     const afterData = templateHtml.slice(endIndex);
     const jsonData = JSON.stringify(mergedData).replace(/</g, "\\u003c");
 
-    return `${beforeData}\n  const allData = ${jsonData}\n  ${afterData}`;
+    const mergedHtml = `${beforeData}\n  const allData = ${jsonData}\n  ${afterData}`;
+    return mergedHtml.replace(/<meta\b[^>]*>/gi, tag => {
+        if (!/\bname=["']viewport["']/i.test(tag)) {
+            return tag;
+        }
+
+        return tag.replace(/\bcontent=(["'])(.*?)\1/i, (_, quote, content) =>
+            `content=${quote}${content.replace(/;\s*(?=[\w-]+\s*=)/g, ", ")}${quote}`
+        );
+    });
 }
 
 function downloadHtmlFile(filename, html) {
