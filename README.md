@@ -5,7 +5,7 @@ In PocketPlatformer you can create games with own tiles (textures) in a user fri
 In PocketPlatformMerger you can select two or more games to Merge them into one game so for example if you have 3 Games, game one has 2 levels, game 2 has 3 levels and game 3 has 5 levels, you get one big game with 10 levels, from all the levels.
 
 ## How it works
-Open either merger page in a browser and add two or more games saved in the `.html` format. The games appear in an ordered list: use the arrow buttons to choose the merge order, or remove games from the list. Enter a name for the merged game before merging.
+Open `index.html` in a browser and choose Classic or Metroidvania mode. You can also open either merger directly: `classic/index.html` or `metroidvania/index.html`. Add two or more games saved in the `.html` format. The games appear in an ordered list: use the arrow buttons to choose the merge order, or remove games from the list. Enter a name for the merged game before merging.
 
 Use **Open merged game** to load an existing merge into the editor. Newly merged downloads retain their source games, so they are restored individually and can be reordered, renamed, added, or removed before merging again. Older files without saved source data are split using the merged title and an even distribution of rooms where possible; check the inferred result before saving, as the original boundaries cannot always be recovered.
 
