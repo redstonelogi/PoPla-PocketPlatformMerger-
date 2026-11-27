@@ -1,4 +1,5 @@
 const DATA_MARKER = "//allDataStart";
+const MERGER_SOURCES_KEY = "pocketPlatformMergerSources";
 
 async function extractGameData(file) {
     const html = await file.text();
@@ -23,6 +24,80 @@ async function extractGameData(file) {
     }
 
     return gameData;
+}
+
+function expandEditableGames(game, fileName) {
+    if (Object.hasOwn(game, MERGER_SOURCES_KEY)) {
+        const sourceGames = game[MERGER_SOURCES_KEY];
+        if (!Array.isArray(sourceGames) || sourceGames.length < 2) {
+            throw new Error(`${fileName} contains invalid editable merge data.`);
+        }
+        return sourceGames.flatMap(sourceGame => expandEditableGames(sourceGame, fileName));
+    }
+
+    if (!Array.isArray(game.levels) || game.levels.length < 3) {
+        throw new Error(`${fileName} does not contain valid game levels.`);
+    }
+
+    const names = typeof game.gamesName === "string"
+        ? game.gamesName.split(/\s+\+\s+/).map(name => name.trim()).filter(Boolean)
+        : [];
+    const playableLevelCount = game.levels.length - 2;
+    if (names.length > 1 && playableLevelCount > 0 && playableLevelCount % names.length === 0) {
+        const levelsPerGame = playableLevelCount / names.length;
+        const startScreen = JSON.parse(JSON.stringify(game.levels[0]));
+        const endingScreen = JSON.parse(JSON.stringify(game.levels[game.levels.length - 1]));
+
+        return names.map((name, gameIndex) => {
+            const firstSourceLevel = 1 + gameIndex * levelsPerGame;
+            const sourceLevels = JSON.parse(JSON.stringify(game.levels.slice(
+                firstSourceLevel,
+                firstSourceLevel + levelsPerGame
+            )));
+            const positions = sourceLevels.map(level => parseRoomPosition(level.position));
+            if (positions.some(position => !position)) {
+                throw new Error(`${fileName} has invalid room positions and cannot be split automatically.`);
+            }
+
+            const minColumn = Math.min(...positions.map(position => position.column));
+            sourceLevels.forEach((level, levelOffset) => {
+                const position = positions[levelOffset];
+                level.position = formatRoomPosition(position.column - minColumn, position.row);
+
+                const remapExits = value => {
+                    if (Array.isArray(value)) {
+                        value.forEach(remapExits);
+                        return;
+                    }
+                    if (!value || typeof value !== "object") {
+                        return;
+                    }
+                    if (value.customExit && Number.isInteger(value.customExit.levelIndex)) {
+                        const destination = value.customExit.levelIndex;
+                        const firstRoom = firstSourceLevel;
+                        const lastRoom = firstSourceLevel + levelsPerGame - 1;
+                        value.customExit.levelIndex = destination >= firstRoom && destination <= lastRoom
+                            ? destination - firstRoom + 1
+                            : sourceLevels.length + 1;
+                    }
+                    Object.values(value).forEach(remapExits);
+                };
+                remapExits(level);
+            });
+
+            return {
+                ...game,
+                gamesName: name,
+                levels: [
+                    JSON.parse(JSON.stringify(startScreen)),
+                    ...sourceLevels,
+                    JSON.parse(JSON.stringify(endingScreen))
+                ]
+            };
+        });
+    }
+
+    return [game];
 }
 
 function mapTargetLevel(levelIndex, gameIndex, levelMaps) {
@@ -368,30 +443,201 @@ function downloadHtmlFile(filename, html) {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-document.getElementById("mergeButton").addEventListener("click", async () => {
-    const files = Array.from(document.getElementById("games").files);
-    const status = document.getElementById("status");
-    const button = document.getElementById("mergeButton");
+const selectedGames = [];
+const gamesInput = document.getElementById("games");
+const openMergedGameInput = document.getElementById("openMergedGame");
+const gamesList = document.getElementById("gamesList");
+const gameCount = document.getElementById("gameCount");
+const gameNameInput = document.getElementById("gameName");
+const mergeButton = document.getElementById("mergeButton");
+const status = document.getElementById("status");
+let isMerging = false;
+let pendingFileLoads = 0;
 
-    if (files.length < 2) {
-        status.textContent = "Please select at least two game files.";
+function renderGamesList() {
+    gamesList.replaceChildren();
+    gameCount.textContent = `${selectedGames.length} ${selectedGames.length === 1 ? "game" : "games"}`;
+    mergeButton.disabled = isMerging || pendingFileLoads > 0 || selectedGames.length < 2;
+
+    if (selectedGames.length === 0) {
+        const emptyState = document.createElement("li");
+        emptyState.className = "empty-state";
+        emptyState.textContent = "No games added yet.";
+        gamesList.appendChild(emptyState);
         return;
     }
 
-    button.disabled = true;
+    selectedGames.forEach((entry, index) => {
+        const row = document.createElement("li");
+        row.className = "game-row";
+
+        const number = document.createElement("span");
+        number.className = "game-number";
+        number.textContent = String(index + 1);
+        number.setAttribute("aria-label", `Game ${index + 1}`);
+
+        const gameName = document.createElement("input");
+        gameName.className = "game-label";
+        gameName.type = "text";
+        gameName.maxLength = 80;
+        gameName.value = entry.data.gamesName;
+        gameName.setAttribute("aria-label", `Name of game ${index + 1}`);
+        gameName.addEventListener("input", () => {
+            entry.data.gamesName = gameName.value;
+        });
+
+        const actions = document.createElement("div");
+        actions.className = "row-actions";
+
+        const moveUpButton = document.createElement("button");
+        moveUpButton.type = "button";
+        moveUpButton.textContent = "↑";
+        moveUpButton.title = "Move up";
+        moveUpButton.setAttribute("aria-label", `Move ${entry.data.gamesName} up`);
+        moveUpButton.disabled = index === 0;
+        moveUpButton.addEventListener("click", () => moveGame(index, -1));
+
+        const moveDownButton = document.createElement("button");
+        moveDownButton.type = "button";
+        moveDownButton.textContent = "↓";
+        moveDownButton.title = "Move down";
+        moveDownButton.setAttribute("aria-label", `Move ${entry.data.gamesName} down`);
+        moveDownButton.disabled = index === selectedGames.length - 1;
+        moveDownButton.addEventListener("click", () => moveGame(index, 1));
+
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "remove-game";
+        removeButton.textContent = "×";
+        removeButton.title = "Remove game";
+        removeButton.setAttribute("aria-label", `Remove ${entry.data.gamesName}`);
+        removeButton.addEventListener("click", () => {
+            selectedGames.splice(index, 1);
+            renderGamesList();
+        });
+
+        actions.append(moveUpButton, moveDownButton, removeButton);
+        row.append(number, gameName, actions);
+        gamesList.appendChild(row);
+    });
+}
+
+function moveGame(index, offset) {
+    const targetIndex = index + offset;
+    if (targetIndex < 0 || targetIndex >= selectedGames.length) {
+        return;
+    }
+
+    [selectedGames[index], selectedGames[targetIndex]] =
+        [selectedGames[targetIndex], selectedGames[index]];
+    renderGamesList();
+}
+
+async function loadGames(files, replace = false) {
+    if (files.length === 0) {
+        return;
+    }
+
+    const errors = [];
+    pendingFileLoads++;
+    renderGamesList();
+    const loadedGames = [];
+    let openedGameData;
+
+    try {
+        for (const file of files) {
+            try {
+                const gameData = await extractGameData(file);
+                const editableGames = expandEditableGames(gameData, file.name);
+                editableGames.forEach((data, index) => {
+                    if (!data.gamesName) {
+                        data.gamesName = editableGames.length > 1
+                            ? `Game ${index + 1}`
+                            : file.name.replace(/\.html?$/i, "");
+                    }
+                    loadedGames.push({ data, templateFile: file });
+                });
+                if (replace) {
+                    openedGameData = gameData;
+                }
+            } catch (error) {
+                errors.push(error.message);
+            }
+        }
+    } finally {
+        pendingFileLoads--;
+    }
+
+    if (replace && errors.length === 0) {
+        selectedGames.splice(0, selectedGames.length, ...loadedGames);
+        gameNameInput.value = openedGameData.gamesName || files[0].name.replace(/\.html?$/i, "");
+    } else if (!replace) {
+        selectedGames.push(...loadedGames);
+    }
+
+    renderGamesList();
+    if (errors.length) {
+        status.textContent = `Could not open file: ${errors.join(" ")}`;
+    } else if (replace && Object.hasOwn(openedGameData, MERGER_SOURCES_KEY)) {
+        status.textContent = `Opened ${loadedGames.length} games from the merge. You can edit their names, order, and contents.`;
+    } else if (replace && loadedGames.length > 1) {
+        status.textContent = `Reconstructed ${loadedGames.length} games from the title and room order. Please verify the split before saving.`;
+    } else if (replace) {
+        status.textContent = "This game has no saved component games and could not be reliably split. It was opened as one game.";
+    } else {
+        status.textContent = "";
+    }
+}
+
+gamesInput.addEventListener("change", () => {
+    const files = Array.from(gamesInput.files);
+    gamesInput.value = "";
+    loadGames(files);
+});
+
+openMergedGameInput.addEventListener("change", () => {
+    const file = openMergedGameInput.files[0];
+    openMergedGameInput.value = "";
+    if (file) {
+        loadGames([file], true);
+    }
+});
+
+mergeButton.addEventListener("click", async () => {
+    const games = selectedGames.map(entry => entry.data);
+    const templateFile = selectedGames[0]?.templateFile;
+    const gameName = gameNameInput.value.trim();
+
+    if (games.length < 2) {
+        status.textContent = "Please add at least two game files.";
+        return;
+    }
+    if (!gameName) {
+        status.textContent = "Please give the merged game a name.";
+        gameNameInput.focus();
+        return;
+    }
+
+    isMerging = true;
+    mergeButton.disabled = true;
     status.textContent = "Merging games...";
     try {
-        const games = await Promise.all(files.map(extractGameData));
+        const editableSources = JSON.parse(JSON.stringify(games));
         const mergedData = mergeGames(games);
-        const templateHtml = await files[0].text();
+        mergedData[MERGER_SOURCES_KEY] = editableSources;
+        mergedData.gamesName = gameName;
+        const templateHtml = await templateFile.text();
         const mergedHtml = buildMergedHtml(templateHtml, mergedData);
-        const filename = (mergedData.gamesName || "Merged_Metroidvania").replace(/[^a-z0-9_-]/gi, "_");
-        downloadHtmlFile(filename, mergedHtml);
-        status.textContent = `Merged successfully: ${mergedData.levels.length - 2} rooms.`;
+        const filename = gameName.replace(/[^a-z0-9_-]/gi, "_");
+        downloadHtmlFile(filename || "Merged_Metroidvania", mergedHtml);
+        status.textContent = `Merged successfully: “${gameName}” (${mergedData.levels.length - 2} rooms). You can keep editing the list and merge again.`;
     } catch (error) {
         console.error(error);
         status.textContent = `Merge failed: ${error.message}`;
     } finally {
-        button.disabled = false;
+        isMerging = false;
+        renderGamesList();
     }
 });
+
+renderGamesList();
